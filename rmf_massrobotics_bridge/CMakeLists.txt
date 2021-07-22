@@ -44,23 +44,8 @@ target_include_directories(websocket_bridge
 )
 
 #===============================================================================
-add_executable(websocket_test
-  src/websocket_test/main.cpp
-)
-ament_target_dependencies(websocket_test
-  rclcpp
-)
-target_link_libraries(websocket_test
-  ${websocketpp_LIBRARIES}
-)
-target_include_directories(websocket_test
-PRIVATE
-  ${websocketpp_INCLUDE_DIR}
-)
-
-#===============================================================================
 install(
-  TARGETS websocket_bridge websocket_test
+  TARGETS websocket_bridge
   RUNTIME DESTINATION lib/${PROJECT_NAME}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
