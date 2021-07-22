@@ -19,6 +19,7 @@ find_package(rmf_traffic REQUIRED)
 find_package(rmf_traffic_ros2 REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rmf_visualization_schedule REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 #===============================================================================
 add_executable(websocket_bridge
@@ -32,7 +33,8 @@ ament_target_dependencies(websocket_bridge
 
 target_link_libraries(websocket_bridge
   ${websocketpp_LIBRARIES}
-  ${OpenSSL_LIBRARIES}
+  OpenSSL::SSL
+  OpenSSL::Crypto
   rmf_traffic::rmf_traffic
   rmf_traffic_ros2::rmf_traffic_ros2
 )
@@ -40,7 +42,6 @@ target_link_libraries(websocket_bridge
 target_include_directories(websocket_bridge
   PUBLIC
     ${websocketpp_INCLUDE_DIR}
-    ${OpenSSL_INCLUDE_DIR}
 )
 
 #===============================================================================

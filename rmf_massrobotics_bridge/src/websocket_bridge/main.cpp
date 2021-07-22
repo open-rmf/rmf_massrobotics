@@ -15,12 +15,15 @@
  *
 */
 
+#include <random>
 #include <chrono>
 #include <memory>
+#include <sstream>
 #include <iomanip>
-#include <unordered_set>
+#include <unordered_map>
 #include <rclcpp/rclcpp.hpp>
 
+#include <openssl/sha.h>
 #include <websocketpp/client.hpp>
 #include <websocketpp/common/thread.hpp>
 #include <websocketpp/common/memory.hpp>
@@ -34,6 +37,31 @@
 #include <std_msgs/msg/string.hpp>
 
 #include "../json.hpp"
+
+//==============================================================================
+void sha256(
+  const std::string &srcStr,
+  std::string &encodedStr,
+  std::string &encodedHexStr)
+{
+  // call sha256 hash
+  unsigned char mdStr[33] = {0};
+  SHA256((const unsigned char *)srcStr.c_str(), srcStr.length(), mdStr);
+
+  // hashed string
+  encodedStr = std::string((const char *)mdStr);
+  // The hashed hexadecimal string 32 bytes
+  char buf[65] = {0};
+  char tmp[3] = {0};
+  for (int i = 0; i < 32; i++)
+  {
+    sprintf(tmp, "%02x", mdStr[i]);
+    strcat(buf, tmp);
+  }
+  buf[32] ='\0'; // followed by 0, truncated from 32 bytes
+  encodedHexStr = std::string(buf);
+}
+
 
 //==============================================================================
 bool get_arg(
@@ -78,8 +106,9 @@ private:
   
   std::string _map_name = "L1";
   std::string _planar_datum = "SVY21";
+  std::string _planar_datum_uuid = ""; 
   std::string _uri = "ws://localhost:3000";
-  std::unordered_set<std::string> _robot_names;
+  std::unordered_map<std::string, std::string> _robot_names;
 
   bool _connected = false;
   Client _m_endpoint;
@@ -185,10 +214,9 @@ private:
 
     Json j_identity = _j_identity;
     j_identity["manufacturerName"] = "Open Robotics";
-    j_identity["robotModel"] = "TinyRobot";
     j_identity["robotSerialNumber"] = robot_name;
     j_identity["baseRobotEnvelope"] = j_envelope;
-    j_identity["uuid"] = robot_name;
+    j_identity["uuid"] = _robot_names[robot_name];
     j_identity["timestamp"] =
       _time_stamp(
         rmf_traffic_ros2::convert(_schedule_node->get_clock()->now()));
@@ -223,9 +251,14 @@ private:
       for (const auto& elem : elems)
       {
         std::string robot_name = elem.description.name();
-        auto insertion = _robot_names.insert(robot_name);
-        if (insertion.second)
+        auto r_it = _robot_names.find(robot_name);
+        if (r_it == _robot_names.end())
         {
+          std::string encoded_str;
+          std::string encoded_hex_str;
+          sha256(robot_name, encoded_str, encoded_hex_str);
+
+          _robot_names.insert({robot_name, encoded_hex_str});
           _on_new_robot(robot_name);
         }
 
@@ -251,7 +284,7 @@ private:
           j_wp["x"] = finish_position[0];
           j_wp["y"] = finish_position[1];
           j_wp["angle"] = _quat(finish_position[2]);
-          j_wp["planarDatumUUID"] = "4B8302DA-21AD-401F-AF45-1DFD956B80B5";
+          j_wp["planarDatumUUID"] = _planar_datum_uuid; 
           return j_wp;
         };
 
@@ -272,7 +305,7 @@ private:
         j_loc["y"] = start_pos[1];
         j_loc["z"] = 0.0;
         j_loc["angle"] = _quat(start_pos[2]);
-        j_loc["planarDatum"] = "4B8302DA-21AD-401F-AF45-1DFD956B80B5";
+        j_loc["planarDatum"] = _planar_datum;
         j_state["location"] = j_loc;
 
         Json j_vel = _j_velocity;
@@ -328,24 +361,24 @@ private:
     }
   }
 
-  void _on_open(Client* c, websocketpp::connection_hdl hdl)
+  void _on_open(Client*, websocketpp::connection_hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On open...");
     _connected = true;
   }
 
-  void _on_fail(Client* c, websocketpp::connection_hdl hdl)
+  void _on_fail(Client*, websocketpp::connection_hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On fail...");
   }
 
-  void _on_close(Client* c, websocketpp::connection_hdl hdl)
+  void _on_close(Client*, websocketpp::connection_hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On close...");
     _connected = false;
   }
 
-  void _on_message(websocketpp::connection_hdl, Client::message_ptr msg)
+  void _on_message(websocketpp::connection_hdl, Client::message_ptr)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On message...");
   }
@@ -363,6 +396,11 @@ public:
     _planar_datum(planar_datum),
     _uri(uri)
   {
+    std::string encoded_str;
+    std::string encoded_hex_str;
+    sha256(_planar_datum, encoded_str, encoded_hex_str);
+    _planar_datum_uuid = encoded_hex_str;
+
     // Initialize all of websocket
     RCLCPP_INFO(
       _schedule_node->get_logger(),
