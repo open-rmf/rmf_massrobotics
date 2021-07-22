@@ -1,0 +1,25 @@
+<?xml version='1.0' ?>
+
+<launch>
+
+  <arg name="use_sim_time" default="false" description="Use the /clock topic for time to sync with simulation"/>
+
+  <!--
+  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_schedule" output="both" name="rmf_traffic_schedule_primary">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_schedule_monitor" output="both" name="rmf_traffic_schedule_backup">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+  -->
+
+  <!-- Bridge -->
+  <node pkg="rmf_massrobotics_bridge" exec="websocket_bridge" output="both" name="websocket_bridge">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="node_name" value="websocket_bridge_schedule_node"/>
+    <param name="map_name" value="L1"/>
+    <param name="port" value="3000"/>
+    <param name="period_msec" value="1000"/>
+  </node>
+
+</launch>
