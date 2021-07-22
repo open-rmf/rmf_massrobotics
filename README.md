@@ -25,7 +25,7 @@ ros2 launch rmf_demos office.launch.xml
 # Start the bridge on another
 cd rmf_ws
 source install/setup.bash
-ros2 launch rmf_massrobotics bridge.launch.xml
+ros2 launch rmf_massrobotics bridge.launch.xml use_sim_time:=true
 ```
 
 TODOs
