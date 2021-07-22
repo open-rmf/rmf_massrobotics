@@ -3,23 +3,17 @@
 <launch>
 
   <arg name="use_sim_time" default="false" description="Use the /clock topic for time to sync with simulation"/>
-
-  <!--
-  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_schedule" output="both" name="rmf_traffic_schedule_primary">
-    <param name="use_sim_time" value="$(var use_sim_time)"/>
-  </node>
-  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_schedule_monitor" output="both" name="rmf_traffic_schedule_backup">
-    <param name="use_sim_time" value="$(var use_sim_time)"/>
-  </node>
-  -->
+  <arg name="map_name" default="L1" description="Map of interest in the schedule"/>
+  <arg name="planar_datum" default="SVY21" description="Planar datum of the location"/>
+  <arg name="uri" default="ws://localhost:3000" description="URI of the MassRobotics AMR Interop server"/>
+  <arg name="period_msec" default="1000" description="Period at which the server is updated."/>
 
   <!-- Bridge -->
-  <node pkg="rmf_massrobotics_bridge" exec="websocket_bridge" output="both" name="websocket_bridge">
+  <node 
+    pkg="rmf_massrobotics_bridge" exec="websocket_bridge"
+    output="both" name="websocket_bridge"
+    args="-m $(var map_name) -d $(var planar_datum) -u $(var uri) -p $(var period_msec)">
     <param name="use_sim_time" value="$(var use_sim_time)"/>
-    <param name="node_name" value="websocket_bridge_schedule_node"/>
-    <param name="map_name" value="L1"/>
-    <param name="port" value="3000"/>
-    <param name="period_msec" value="1000"/>
   </node>
 
 </launch>

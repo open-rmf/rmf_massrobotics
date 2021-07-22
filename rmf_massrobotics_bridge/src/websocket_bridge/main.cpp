@@ -76,64 +76,65 @@ private:
   std::shared_ptr<rmf_visualization_schedule::ScheduleDataNode> _schedule_node;
   rclcpp::TimerBase::SharedPtr _timer;
   
-  uint16_t _port = 0;
   std::string _map_name = "L1";
+  std::string _planar_datum = "SVY21";
+  std::string _uri = "ws://localhost:3000";
   std::unordered_set<std::string> _robot_names;
 
-  const Json _j_envelope = {{"x", {}}, {"y", {}}};
+  bool _connected = false;
+  Client _m_endpoint;
+  websocketpp::lib::shared_ptr<websocketpp::lib::thread> _m_thread;
+  websocketpp::connection_hdl _m_hdl;
+
+  const Json _j_envelope = {{"x", 0.0}, {"y", 0.0}};
   const Json _j_identity =
   {
-    {"manufacturerName", {}},
-    {"robotModel", {}},
-    {"robotSerialNumb", {}},
-    {"baseRobotEnvelope", {}},
-    {"uuid", {}},
-    {"timestamp", {}}
+    {"manufacturerName", ""},
+    {"robotModel", ""},
+    {"robotSerialNumber", ""},
+    {"baseRobotEnvelope", _j_envelope},
+    {"uuid", ""},
+    {"timestamp", ""}
   };
   const Json _j_angle =
   {
-    {"x", {}},
-    {"y", {}},
-    {"z", {}},
-    {"w", {}}
+    {"x", 0.0},
+    {"y", 0.0},
+    {"z", 0.0},
+    {"w", 1.0}
   };
   const Json _j_velocity =
   {
-    {"linear", {}},
-    {"angular", {}}
+    {"linear", 0.0},
+    {"angular", _j_angle}
   };
   const Json _j_location =
   {
-    {"x", {}},
-    {"y", {}},
-    {"z", {}},
-    {"angle", {}},
-    {"planarDatum", {}}
+    {"x", 0.0},
+    {"y", 0.0},
+    {"z", 0.0},
+    {"angle", _j_angle},
+    {"planarDatum", ""}
   };
   const Json _j_waypoint =
   {
-    {"timestamp", {}},
-    {"x", {}},
-    {"y", {}},
-    {"angle", {}},
-    {"planarDatumUUID", {}}
+    {"timestamp", ""},
+    {"x", 0.0},
+    {"y", 0.0},
+    {"angle", _j_angle},
+    {"planarDatumUUID", ""}
   };
   const Json _j_state =
   {
-    {"uuid", {}},
-    {"timestamp", {}},
-    {"operationalState", {}},
-    {"batteryPercentage", {}},
-    {"velocity", {}},
-    {"location", {}},
+    {"uuid", ""},
+    {"timestamp", ""},
+    {"operationalState", ""},
+    {"batteryPercentage", 0.0},
+    {"velocity", _j_velocity},
+    {"location", _j_location},
     {"path", {}},
     {"destinations", {}}
   };
-
-  bool connected = false;
-  Client m_endpoint;
-  websocketpp::lib::shared_ptr<websocketpp::lib::thread> m_thread;
-  websocketpp::connection_hdl m_hdl;
 
   Json _quat(double yaw)
   {
@@ -169,7 +170,7 @@ private:
 
   void _on_new_robot(const std::string& robot_name)
   {
-    if (!connected)
+    if (!_connected)
       return;
 
     RCLCPP_INFO(
@@ -185,21 +186,21 @@ private:
     Json j_identity = _j_identity;
     j_identity["manufacturerName"] = "Open Robotics";
     j_identity["robotModel"] = "TinyRobot";
-    j_identity["robotSerialNumb"] = robot_name;
+    j_identity["robotSerialNumber"] = robot_name;
     j_identity["baseRobotEnvelope"] = j_envelope;
-    // j_identity["baseRobotEnvelope"].push_back(j_envelope);
     j_identity["uuid"] = robot_name;
     j_identity["timestamp"] =
       _time_stamp(
         rmf_traffic_ros2::convert(_schedule_node->get_clock()->now()));
-  
+ 
     websocketpp::lib::error_code ec;
-    m_endpoint.send(m_hdl, j_identity.dump(), websocketpp::frame::opcode::text, ec);
+    _m_endpoint.send(
+      _m_hdl, j_identity.dump(), websocketpp::frame::opcode::text, ec);
   } 
 
   void _timer_callback_fn()
   {
-    if (!connected)
+    if (!_connected)
       return;
 
     using namespace rmf_visualization_schedule;
@@ -216,7 +217,7 @@ private:
       "Found %d elements.",
       static_cast<int>(elems.size()));
 
-    // Handle json stuff
+    // Handle json
     try
     {
       for (const auto& elem : elems)
@@ -241,11 +242,8 @@ private:
         j_state["timestamp"] = _time_stamp(start_time); 
         j_state["operationalState"] = "navigating";
         j_state["batteryPercentage"] = 1.0;
-        // j_state["velocity"] = 
-        // j_state["location"] =
-        // j_state["path"] =
 
-        auto add_waypoint = [&](rmf_traffic::Time finish_time,
+        auto get_waypoint = [&](rmf_traffic::Time finish_time,
             Eigen::Vector3d finish_position)
         {
           auto j_wp = _j_waypoint;
@@ -254,7 +252,7 @@ private:
           j_wp["y"] = finish_position[1];
           j_wp["angle"] = _quat(finish_position[2]);
           j_wp["planarDatumUUID"] = "4B8302DA-21AD-401F-AF45-1DFD956B80B5";
-          j_state["path"].push_back(j_wp);
+          return j_wp;
         };
 
         auto it = trajectory.find(start_time);
@@ -277,12 +275,26 @@ private:
         j_loc["planarDatum"] = "4B8302DA-21AD-401F-AF45-1DFD956B80B5";
         j_state["location"] = j_loc;
 
-        add_waypoint(it->time(), it->position());
+        Json j_vel = _j_velocity;
+        j_vel["linear"] =
+          sqrt(start_vel[0] * start_vel[0] + start_vel[1] * start_vel[1]);
+        j_vel["angular"] = _quat(start_vel[2]);
+        j_state["velocity"] = j_vel;
+
+        Json wp = get_waypoint(it->time(), it->position());
+        std::string prev_wp_str = wp.dump();
+        j_state["path"].push_back(wp);
 
         // Add the waypoints in between
         for (; it < trajectory.find(end_time); it++)
         {
-          add_waypoint(it->time(), it->position());
+          wp = get_waypoint(it->time(), it->position());
+          std::string wp_str = wp.dump();
+          if (prev_wp_str == wp_str)
+            continue;
+          
+          prev_wp_str = wp_str;
+          j_state["path"].push_back(wp);
         }
        
         // Add the trimmed end
@@ -290,10 +302,17 @@ private:
         begin = it; --begin;
         end = it; ++end;
         motion = rmf_traffic::Motion::compute_cubic_splines(begin, end);
-        add_waypoint(end_time, motion->compute_position(end_time)); 
+        auto last_wp =
+          get_waypoint(end_time, motion->compute_position(end_time));
+        std::string last_wp_str = last_wp.dump();
+
+        if (last_wp_str != prev_wp_str)
+          j_state["path"].push_back(last_wp);
+        j_state["destinations"].push_back(last_wp);
 
         websocketpp::lib::error_code ec;
-        m_endpoint.send(m_hdl, j_state.dump(), websocketpp::frame::opcode::text, ec);
+        _m_endpoint.send(
+          _m_hdl, j_state.dump(), websocketpp::frame::opcode::text, ec);
         RCLCPP_INFO(
           _schedule_node->get_logger(),
           "Sending state once.");
@@ -309,24 +328,24 @@ private:
     }
   }
 
-  void on_open(Client* c, websocketpp::connection_hdl hdl)
+  void _on_open(Client* c, websocketpp::connection_hdl hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On open...");
-    connected = true;
+    _connected = true;
   }
 
-  void on_fail(Client* c, websocketpp::connection_hdl hdl)
+  void _on_fail(Client* c, websocketpp::connection_hdl hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On fail...");
   }
 
-  void on_close(Client* c, websocketpp::connection_hdl hdl)
+  void _on_close(Client* c, websocketpp::connection_hdl hdl)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On close...");
-    connected = false;
+    _connected = false;
   }
 
-  void on_message(websocketpp::connection_hdl, Client::message_ptr msg)
+  void _on_message(websocketpp::connection_hdl, Client::message_ptr msg)
   {
     RCLCPP_INFO(_schedule_node->get_logger(), "On message...");
   }
@@ -336,50 +355,56 @@ public:
   WebsocketClient(
     std::shared_ptr<rmf_visualization_schedule::ScheduleDataNode> schedule_node,
     const std::string& map_name,
-    uint16_t port,
+    const std::string& planar_datum,
+    const std::string& uri,
     uint32_t period_msec)
   : _schedule_node(std::move(schedule_node)),
     _map_name(map_name),
-    _port(port)
+    _planar_datum(planar_datum),
+    _uri(uri)
   {
-    // Initialize all the websocket stuff 
-    // std::string uri = "ws://localhost:" + std::to_string(_port);
-    std::string uri = "ws://localhost:3000";
+    // Initialize all of websocket
     RCLCPP_INFO(
       _schedule_node->get_logger(),
       "Connecting to uri: %s",
-      uri.c_str());
+      _uri.c_str());
 
-    m_endpoint.clear_access_channels(websocketpp::log::alevel::all);
-    m_endpoint.clear_error_channels(websocketpp::log::elevel::all);
-    m_endpoint.init_asio();
-    m_endpoint.start_perpetual();
-    m_thread = websocketpp::lib::make_shared<websocketpp::lib::thread>(&Client::run, &m_endpoint);
+    _m_endpoint.clear_access_channels(websocketpp::log::alevel::all);
+    _m_endpoint.clear_error_channels(websocketpp::log::elevel::all);
+    _m_endpoint.init_asio();
+    _m_endpoint.start_perpetual();
+    _m_thread =
+      websocketpp::lib::make_shared<websocketpp::lib::thread>(
+        &Client::run, &_m_endpoint);
 
     websocketpp::lib::error_code ec;
-    Client::connection_ptr con = m_endpoint.get_connection(uri, ec);
+    Client::connection_ptr con = _m_endpoint.get_connection(_uri, ec);
     if (ec)
     {
-      std::cout << "> Connect initialization error: " << ec.message() << std::endl;
+      std::cout << "Connect initialization error: " << ec.message()
+        << std::endl;
       return;
     }
     
-    m_hdl = con->get_handle();
+    _m_hdl = con->get_handle();
     con->set_open_handler(
       websocketpp::lib::bind(
-        &WebsocketClient::on_open, this, &m_endpoint, websocketpp::lib::placeholders::_1));
+        &WebsocketClient::_on_open, this, &_m_endpoint,
+        websocketpp::lib::placeholders::_1));
     con->set_fail_handler(
       websocketpp::lib::bind(
-        &WebsocketClient::on_fail, this, &m_endpoint, websocketpp::lib::placeholders::_1));
+        &WebsocketClient::_on_fail, this, &_m_endpoint,
+        websocketpp::lib::placeholders::_1));
     con->set_close_handler(
       websocketpp::lib::bind(
-        &WebsocketClient::on_close, this, &m_endpoint, websocketpp::lib::placeholders::_1));
+        &WebsocketClient::_on_close, this, &_m_endpoint,
+        websocketpp::lib::placeholders::_1));
     con->set_message_handler(
       websocketpp::lib::bind(
-        &WebsocketClient::on_message, this,
+        &WebsocketClient::_on_message, this,
         websocketpp::lib::placeholders::_1,
         websocketpp::lib::placeholders::_2));
-    m_endpoint.connect(con);
+    _m_endpoint.connect(con);
 
     std::chrono::milliseconds period(period_msec);
     _timer =
@@ -390,18 +415,18 @@ public:
 
   ~WebsocketClient()
   {
-    m_endpoint.stop_perpetual();
-    if (connected)
+    _m_endpoint.stop_perpetual();
+    if (_connected)
     {
       std::cout << "Closing connection in destructor..." << std::endl;
       websocketpp::lib::error_code ec;
-      m_endpoint.close(m_hdl, websocketpp::close::status::going_away, "", ec);
+      _m_endpoint.close(_m_hdl, websocketpp::close::status::going_away, "", ec);
       if (ec)
       {
         std::cout << "Error closing connection: " << ec.message() << std::endl;
       }
     }
-    m_thread->join();
+    _m_thread->join();
   }
 };
 
@@ -417,13 +442,14 @@ int main(int argc, char** argv)
   std::string map_name = "L1";
   get_arg(args, "-m", map_name, "map_name", false);
 
-  std::string port_string;
-  get_arg(args, "-p", port_string, "port", false);
-  const uint16_t port = port_string.empty() ? 8006 : std::stoul(
-    port_string, nullptr, 0);
+  std::string planar_datum = "SVY21";
+  get_arg(args, "-d", planar_datum, "planar_datum", false);
+
+  std::string uri = "ws://localhost:3000";
+  get_arg(args, "-u", uri, "uri", false);
 
   std::string period_msec_string;
-  get_arg(args, "-r", period_msec_string, "period_msec", false);
+  get_arg(args, "-p", period_msec_string, "period_msec", false);
   uint32_t period_msec = period_msec_string.empty() ?
     1000 : std::stod(period_msec_string);
 
@@ -438,7 +464,8 @@ int main(int argc, char** argv)
   std::shared_ptr<WebsocketClient> websocket_client(new WebsocketClient(
     schedule_data_node,
     map_name,
-    port,
+    planar_datum,
+    uri,
     period_msec));
 
   RCLCPP_INFO(
