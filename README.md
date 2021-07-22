@@ -1,5 +1,7 @@
 # RMF - Massrobotics integration efforts
 
+![](../media/bridge.gif)
+
 To build, clone this repository into your RMF workspace
 
 ```bash
